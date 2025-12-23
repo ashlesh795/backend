@@ -1,8 +1,13 @@
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
+from enum import Enum
 
-
+class TaskStatus(str, Enum):
+    open = "open"
+    in_progress = "in_progress"
+    done = "done"
+ 
 class TaskCreate(BaseModel):
     title: str = Field(
         min_length=1,
@@ -41,10 +46,10 @@ class TaskUpdate(BaseModel):
         ge=1,
         le=3
     )
-    status: Optional[str] = None
+    status: Optional[TaskStatus] = None
 
 class Task(TaskCreate):
     id: int = Field(..., description="Unique task ID")
-    status: str = Field(default="open", description="Task status")
+    status: TaskStatus
     created_at: datetime
     updated_at: datetime

@@ -1,90 +1,78 @@
-from fastapi import APIRouter, HTTPException
-from typing import List
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
 from datetime import datetime
+from typing import List
 
-from app.schemas.task import TaskCreate, Task, TaskUpdate
+from app.schemas.task import TaskCreate, Task, TaskUpdate,TaskStatus
+from app.models.task import TaskModel
+from app.deps import get_db
 
 router = APIRouter(
     prefix="/tasks",
     tags=["tasks"]
 )
 
-# -----------------------------
-# Simulated in-memory database
-# -----------------------------
-_DB: List[Task] = []
-_ID_COUNTER = 1
-
-
-@router.get("/", response_model=List[Task])
-async def get_tasks():
-    return _DB
-
 
 @router.post("/", response_model=Task, status_code=201)
-async def create_task(payload: TaskCreate):
-    global _ID_COUNTER
-
+def create_task(payload: TaskCreate, db: Session = Depends(get_db)):
     now = datetime.utcnow()
 
-    task = Task(
-        id=_ID_COUNTER,
+    task = TaskModel(
         title=payload.title,
         description=payload.description,
         due_date=payload.due_date,
         priority=payload.priority,
-        status="open",
+        status=TaskStatus.open,
         created_at=now,
         updated_at=now
     )
 
-    _DB.append(task)
-    _ID_COUNTER += 1
+    db.add(task)
+    db.commit()
+    db.refresh(task)
 
     return task
 
 
-@router.get("/{task_id}", response_model=Task)
-async def get_task(task_id: int):
-    for task in _DB:
-        if task.id == task_id:
-            return task
+@router.get("/", response_model=List[Task])
+def get_tasks(db: Session = Depends(get_db)):
+    return db.query(TaskModel).all()
 
-    raise HTTPException(
-        status_code=404,
-        detail="Task not found"
-    )
+
+@router.get("/{task_id}", response_model=Task)
+def get_task(task_id: int, db: Session = Depends(get_db)):
+    task = db.query(TaskModel).filter(TaskModel.id == task_id).first()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    return task
+
 
 @router.put("/{task_id}", response_model=Task)
-async def update_task(task_id: int, payload: TaskUpdate):
-    for index, task in enumerate(_DB):
-        if task.id == task_id:
-            updated_data = task.model_dump()
+def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)):
+    task = db.query(TaskModel).filter(TaskModel.id == task_id).first()
 
-            for field, value in payload.model_dump(exclude_unset=True).items():
-                updated_data[field] = value
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
 
-            updated_data["updated_at"] = datetime.utcnow()
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(task, field, value)
 
-            updated_task = Task(**updated_data)
-            _DB[index] = updated_task
+    task.updated_at = datetime.utcnow()
 
-            return updated_task
+    db.commit()
+    db.refresh(task)
 
-    raise HTTPException(
-        status_code=404,
-        detail="Task not found"
-    )
+    return task
+
 
 @router.delete("/{task_id}", status_code=204)
-async def delete_task(task_id: int):
-    for index, task in enumerate(_DB):
-        if task.id == task_id:
-            _DB.pop(index)
-            return
+def delete_task(task_id: int, db: Session = Depends(get_db)):
+    task = db.query(TaskModel).filter(TaskModel.id == task_id).first()
 
-    raise HTTPException(
-        status_code=404,
-        detail="Task not found"
-    )
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
 
+    db.delete(task)
+    db.commit()
